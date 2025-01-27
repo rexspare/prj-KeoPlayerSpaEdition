@@ -1,0 +1,952 @@
+import {
+  StyleSheet,
+  Text,
+  View,
+  PermissionsAndroid,
+  Modal,
+  Image,
+  TouchableOpacity,
+  Platform,
+  Dimensions,
+  Alert,
+  NativeModules,
+} from "react-native";
+import React, { useState, useEffect } from "react";
+import GradientContainer from "../../../components/common/GradientContainer";
+import { isDeviceTablet } from "../../../utils/myUtils";
+import { useThemeContext } from "../../../context/ThemeContext";
+import { useAuthContext } from "../../../context/AuthContext";
+import Appbar from "../../../components/common/Appbar";
+import { COLORS } from "../../../constants/Colors";
+import { height_, width_ } from "../../../constants/Dimensions";
+import { FONTS } from "../../../constants/Fonts";
+import ProgressBar from "react-native-animated-progress";
+import { showMessage, hideMessage } from "react-native-flash-message";
+import {
+  addGuidesToFavorite,
+  getAllYourGuides,
+  getPatchesByGuideId,
+} from "../../../utils/guideStore";
+// Import ReactNativeBlobUtil for the file download
+// import RNFetchBlob from 'rn-fetch-blob';
+import ReactNativeBlobUtil from "react-native-blob-util";
+import { isRegExp } from "lodash";
+import SQLite from "react-native-sqlite-storage";
+import RNFS from "react-native-fs";
+import { left_icon } from "../../../constants/Images";
+import Share from "react-native-share";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { CameraRoll } from "@react-native-camera-roll/camera-roll";
+import { firestoreRef } from "../../../utils/firebaseImports";
+import { ROUTES } from "../../../constants/Routes";
+import { useNavigation } from "@react-navigation/native";
+
+const db = SQLite.openDatabase(
+  {
+    name: "PatchPocket",
+    location: "default",
+  },
+  () => {},
+  (error) => {
+    console.log(error);
+  }
+);
+
+const DownloadScreen = (props) => {
+  const { theme } = useThemeContext();
+  const { currentAuth } = useAuthContext();
+  const isTab = isDeviceTablet();
+  const myStyle = styles(theme, isTab);
+  const { item } = props;
+  const [progress, setprogress] = useState(0);
+  const [yourGuides, setYourGuides] = useState([]);
+  const [isLoading, setisLoading] = useState(false);
+  const [task_, settask] = useState(null);
+  const [isCancelled, setisCancelled] = useState(false);
+  const [guidePactches, setguidePactches] = useState([]);
+  let scrollPosPercent = progress;
+  const [guideLocalUrl, setguideLocalUrl] = useState("");
+  const [patchLocalData, setpatchLocalData] = useState([]);
+  const [isDownloadingPatches, setisDownloadingPatches] = useState(false);
+  const [item_, setitem] = useState(props?.item);
+  const [reershState, setreershState] = useState(false);
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    setprogress(0);
+    setpatchLocalData([]);
+    setguideLocalUrl("");
+    setisDownloadingPatches(false);
+    getWholeGuid();
+  }, [props.refreshState]);
+
+  // GET WHOLE GUIDE
+  useEffect(() => {
+    setitem(props?.item);
+    getWholeGuid();
+    setisDownloadingPatches(false);
+    setpatchLocalData([]);
+  }, [props?.item?.id]);
+
+  let patches_ = [];
+  const getWholeGuid = async () => {
+    if (item?.id) {
+      let patches = await getPatchesByGuideId(item.id || "id");
+      patches_ = patches;
+    //   console.log("Patchess.....", patches_);
+      setguidePactches(patches);
+      setTimeout(async () => {
+        await getFilterTypes(patches_);
+        checkPermission();
+      }, 1000);
+    }
+  };
+
+  useEffect(() => {
+    if (guidePactches?.length > 0) {
+      if (Platform.OS === "ios") {
+        if (patchLocalData?.length == guidePactches?.length) {
+          // saveImage()
+          saveInLocal();
+        }
+      } else {
+        if (patchLocalData?.length == guidePactches?.length) {
+          saveInLocal();
+        }
+      }
+    }
+  }, [patchLocalData?.length, guideLocalUrl]);
+
+  // END
+
+  const callback_ = async (path) => {
+    setpatchLocalData([]);
+    setguideLocalUrl(Platform.OS === "ios" ? path : "file://" + path);
+    setisDownloadingPatches(true);
+    if (patches_?.length > 0) {
+      patches_.forEach((x, i) => {
+        setTimeout(() => {
+          downloadImage(x.image_url[0], (path_) => {}, x.name, true, x, i);
+        }, 1000 * (i + 1));
+      });
+      // await getFilterTypes()
+    } else {
+      saveInLocal();
+    }
+  };
+
+  // const REMOTE_IMAGE_PATH = item.image_url
+  const checkPermission = async () => {
+    // Function to check the platform
+    // If iOS then start downloading
+    // If Android then ask for permission
+    const { config, fs } = ReactNativeBlobUtil;
+    if (Platform.OS === "ios") {
+      downloadImage(item.image_url, callback_);
+      await getFilterTypes();
+    } else {
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+          {
+            title: "Storage Permission Required",
+            message: "App needs access to your storage to download data",
+          }
+        );
+        if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+          // Once user grant the permission start downloading
+          console.log("Storage Permission Granted.");
+          downloadImage(item.image_url, callback_);
+          await getFilterTypes();
+        } else {
+          // If permission denied then show alert
+          alert("Storage Permission Not Granted");
+        }
+        // let task = config(options).fetch('GET', image_URL);
+        // console.log("Task...", task)
+      } catch (err) {
+        // To handle permission related exception
+        console.warn(err);
+        setisLoading(false);
+      }
+    }
+  };
+
+  const downloadImage = (
+    REMOTE_IMAGE_PATH,
+    callback = () => {},
+    name = item.title,
+    isPatch = false,
+    patch = {},
+    index = 0
+  ) => {
+    const { config, fs } = ReactNativeBlobUtil;
+    // Main function to download the image
+
+    // To add the time suffix in filename
+    let date = new Date();
+    // Image URL which we want to download
+    let image_URL = REMOTE_IMAGE_PATH;
+
+    // Get config and fs from ReactNativeBlobUtil
+    // config: To pass the downloading related options
+    // fs: Directory path where we want our image to download
+
+    let dirs = ReactNativeBlobUtil.fs.dirs;
+    let folderName = "patchPocketData";
+
+    let path;
+    if (Platform.OS === "ios") {
+      path = fs.dirs.DocumentDir; // Use DocumentDir for iOS private storage
+    } else if (Platform.OS === "android") {
+      path = fs.dirs.CacheDir; // Use CacheDir for Android private storage
+    }
+
+    let folderPath = path + "/" + folderName;
+    if (!fs.exists(folderPath)) {
+      fs.mkdir(folderPath);
+    }
+
+    let options = {
+      fileCache: true,
+      appendExt: "jpg",
+      indicator: true,
+      IOSBackgroundTask: true,
+      path: folderPath + "/" + name?.replace(/ /g, "_") + ".jpg", // Use .jpg extension
+    };
+
+    // let path =
+    //   Platform.OS === "ios" ? fs.dirs.DocumentDir : RNFS.DownloadDirectoryPath;
+    // let folderPath = path + "/" + folderName;
+    // if (!fs.exists(folderPath)) {
+    //   fs.mkdir(folderPath);
+    // }
+
+    //     // let path = Platform.OS === 'ios' ? fs.dirs.DocumentDir : RNFS.DownloadDirectoryPath
+
+    //     let options = {
+    //         fileCache: true,
+    //         appendExt: 'jpg',
+    //         indicator: true,
+    //         IOSBackgroundTask: true,
+    //         path: folderPath + "/" + name?.replace(/ /g, '_') + '.jgp',
+    //     };
+
+    setisLoading(true);
+    setisCancelled(false);
+    try {
+      let task = config(options).fetch("GET", image_URL);
+      settask(task);
+
+      // listen to download progress event
+      task
+        .progress((received, total) => {
+          setprogress(parseInt((received / total) * 100));
+        })
+        .catch((error) => {
+          console.log("==>>", error);
+          // setisLoading(false)
+        });
+
+      task
+        .then(async (res) => {
+          // Showing alert after successful downloading
+          console.log("res -> ", res.path());
+          if (Platform.OS === "android") {
+            if (isPatch == true) {
+              setpatchLocalData((prev) => [
+                ...prev,
+                { ...patch, image_url: ["file://" + res.path()] },
+              ]);
+            }
+            // await getFilterTypes()
+            callback(res.path());
+          }
+          if (isPatch == true && Platform.OS === "ios") {
+          }
+
+          if (Platform.OS === "ios") {
+            const filePath = res.path();
+            let options = {
+              type: item.title?.replace(/ /g, "_") + ".jpg",
+              url: filePath,
+              saveToFiles: true,
+            };
+            setTimeout(() => {
+              setprogress(100);
+ setreershState(!reershState);
+                    if (isPatch == true) {
+                      setTimeout(async () => {
+                        setpatchLocalData((prev) => [
+                          ...prev,
+                          ...[{ ...patch, image_url:[ res.path()] }],
+                        ]);
+                      }, 500);
+                    }
+                    // await getFilterTypes();
+                    callback(res.path());
+              // CameraRoll.save(filePath)
+              //   .then(async (res) => {
+              //     console.log("save img...", res);
+              //     setprogress(100);
+              //     // activeClickHandler(item.id)
+              //     // setisLoading(false)
+              //     setTimeout(async () => {
+              //       setreershState(!reershState);
+              //       if (isPatch == true) {
+              //         setTimeout(async () => {
+              //           setpatchLocalData((prev) => [
+              //             ...prev,
+              //             ...[{ ...patch, image_url: [res] }],
+              //           ]);
+              //         }, 500);
+              //       }
+              //       // await getFilterTypes();
+              //       callback(res);
+              //     }, 500);
+              //   })
+              //   .catch((err) => {
+              //     setTimeout(async () => {
+              //       if (isPatch == true) {
+              //         setTimeout(async () => {
+              //           setpatchLocalData((prev) => [
+              //             ...prev,
+              //             ...[{ ...patch, image_url: [image_URL] }],
+              //           ]);
+              //         }, 500);
+              //       }
+              //       callback(image_URL);
+              //       // await getFilterTypes();
+              //     }, 500);
+              //   });
+            }, 500);
+          } else {
+            setprogress(100);
+            // activeClickHandler(item.id)
+            // setisLoading(false)
+            // props.onclose()
+          }
+        })
+        .catch((error) => {
+          console.log("==>>", error);
+          if (isPatch == true) {
+            setpatchLocalData((prev) => [...prev, { ...patch }]);
+          }
+          if (error != "Error: canceled") {
+            alert("Timeout downloading patch, please try again");
+          }
+          setisLoading(false);
+        });
+    } catch (err) {}
+  };
+
+  const userId = currentAuth.uid;
+  const guideId = item.id;
+
+  let guideIdInYourGuides;
+  const activeClickHandler = async (id) => {
+    const res = await getAllYourGuides(userId);
+    let guideIdInYourGuides_ = res.map((d) => d.guideId);
+    if (guideIdInYourGuides_.includes(id)) {
+      // await deleteYourGuidesIfUnsubscribe(userId, id);
+      // getAllYourGuidesFun(userId);
+    } else {
+      await addGuidesToFavorite(guideId, userId);
+      await db.transaction(async (tx) => {
+        await tx.executeSql(
+          "INSERT INTO yourGuides (guideId, userId, isAddedToYourGuide) VALUES ('" +
+            guideId +
+            "," +
+            userId +
+            ", " +
+            true +
+            "')"
+        );
+      });
+      showMessage({
+        message: "Guide Added",
+        description: "Guide has been successfully added to Your Guides",
+        type: "success",
+      });
+      getAllYourGuidesFun(userId);
+      setisLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setprogress(0);
+    getAllYourGuidesFun();
+  }, []);
+
+  const getAllYourGuidesFun = async () => {
+    const res = await getAllYourGuides(userId);
+    setYourGuides(res);
+  };
+  guideIdInYourGuides = yourGuides.map((d) => d.guideId);
+// console.log("Patch Data.....", patchLocalData)
+  const getFilterTypes = async (patches_) => {
+    try {
+      let updatedPatchData = [...patches_]; // Create a copy of the patchLocalData state
+      let bodyTypeList = [];
+      let colorList = [];
+      let patchBorderList =[];
+
+      // Fetch bodyTypeList and colorList using Promise.all
+      await Promise.all(
+        updatedPatchData.map(async (patch) => {
+          const bodyTypeDoc = await firestoreRef
+            .collection("newTypes")
+            .doc(patch.type)
+            .get();
+          const colorDoc = await firestoreRef
+            .collection("newColor")
+            .doc(patch.bd_color)
+            .get();
+          const bdDoc = await firestoreRef
+          .collection("newBorder")
+          .doc(patch.bd_type)
+          .get();
+
+        //   Add bodyTypeList data
+          let bodyTypeExists =
+            bodyTypeList?.length > 0 &&
+            bodyTypeList.find((item) => item?.id === bodyTypeDoc.id);
+          if (!bodyTypeExists) {
+            bodyTypeList.push({
+              ...bodyTypeDoc.data(),
+              id: bodyTypeDoc.id,
+              type: "bodyType",
+            });
+          }
+
+          // Add colorList data
+          let colorExists =
+            colorList?.length > 0 &&
+            colorList.find((item) => item?.id === colorDoc.id);
+          if (!colorExists) {
+            colorList.push({
+              ...colorDoc.data(),
+              id: colorDoc.id,
+              type: "color",
+            });
+          }
+
+          let patchBorderExists = patchBorderList?.length > 0 &&
+          patchBorderList.find((item) => item?.id === bdDoc.id)
+          if(!patchBorderExists){
+            patchBorderList.push({
+                ...bdDoc.data(),
+                id: bdDoc.id,
+                type: "patchBorder"
+            })
+          }
+          // Update the current patch with bodyTypeList and colorList properties
+          patch.bodyTypeList = bodyTypeList.filter(
+            (item) => item?.id === patch.type
+          );
+          patch.colorList = colorList.filter(
+            (item) => item?.id === patch.bd_color
+          );
+          patch.patchBorders = patchBorderList.filter(
+            (item) => item?.id === patch.bd_type
+          )
+        })
+      );
+
+      //   console.log("Body Type List....", bodyTypeList);
+      //   console.log("Color List....", colorList);
+
+      // updatedPatchData.forEach((patch) => {
+      //   patch.patches.bodyTypeList = bodyTypeList;
+      //   patch.patches.colorList = colorList;
+      // });
+      // updatedPatchData((prev) => [...prev, ...[{ ...patch, bodyTypeList: bodyTypeList, colorList: colorList }]])
+
+      //   console.log("Updated Patch Data....", updatedPatchData);
+
+      // Set the updated patchLocalData state
+      setpatchLocalData(updatedPatchData);
+
+      // Other operations...
+    } catch (error) {
+      console.error("Error in getFilterTypes:", error);
+    }
+  };
+
+  //     const getFilterTypes = async (patches_) => {
+  //         try {
+  //             let updatedPatchData = [...patches_]; // Create a copy of the patchLocalData state
+  //             let bodyTypeList = [];
+  //             let colorList = [];
+
+  //     // Fetch bodyTypeList and colorList using Promise.all
+  //     await Promise.all(
+  //       updatedPatchData.map(async (patch) => {
+  //         const bodyTypeDoc = await firestoreRef
+  //           .collection("newTypes")
+  //           .doc(patch.type)
+  //           .get();
+  //         const colorDoc = await firestoreRef
+  //           .collection("newColor")
+  //           .doc(patch.bd_color)
+  //           .get();
+
+  //         // Add bodyTypeList data
+  //         let bodyTypeExists = bodyTypeList?.length > 0 && bodyTypeList.find((item) => item?.id === bodyTypeDoc.id);
+  //         if (!bodyTypeExists) {
+  //           bodyTypeList.push({
+  //             ...bodyTypeDoc.data(),
+  //             id: bodyTypeDoc.id,
+  //             type: "bodyType",
+  //           });
+  //         }
+
+  //         // Add colorList data
+  //         let colorExists = colorList?.length > 0 &&  colorList.find((item) => item?.id === colorDoc.id);
+  //         if (!colorExists) {
+  //           colorList.push({
+  //             ...colorDoc.data(),
+  //             id: colorDoc.id,
+  //             type: "color",
+  //           });
+  //         }
+  //       })
+  //     );
+
+  //     console.log("Body Type List....", bodyTypeList)
+  //     console.log("Color List....", colorList)
+  //     console.log("Updated Patch Data....", updatedPatchData)
+  //     // Update the patchLocalData with bodyTypeList and colorList for each patch
+  //     updatedPatchData.forEach((patch, index) => {
+  //       patch.patches.bodyTypeList = bodyTypeList.filter(
+  //         (item) => item?.id === patch.type
+  //       );
+  //       patch.patches.colorList = colorList.filter((item) => item?.id === patch.bd_color);
+  //     });
+
+  //     // Set the updated patchLocalData state
+  //     setpatchLocalData(updatedPatchData);
+
+  //     // Other operations...
+  //   } catch (error) {
+  //     console.error("Error in getFilterTypes:", error);
+  //   }
+  // };
+
+  // const getFilterTypes = async () => {
+  //     let updatedPatchData = [...patchLocalData]; // Create a copy of the patchLocalData state
+  //     let bodyTypeList = [];
+  //     // Fetch bodyTypeList
+  //     await Promise.all(
+  //       patchLocalData.map(async (patch) => {
+  //         const doc = await firestoreRef
+  //           .collection("newTypes")
+  //           .doc(patch.type)
+  //           .get();
+  //         let exists = bodyTypeList.find((item) => item?.id === doc.id);
+  //         if (!exists) {
+  //           bodyTypeList = bodyTypeList.concat({
+  //             ...doc.data(),
+  //             id: doc.id,
+  //             type: "bodyType",
+  //           });
+  //         }
+  //       })
+  //     );
+
+  //     let colorList = [];
+  //     // Fetch colorList
+  //     await Promise.all(
+  //       patchLocalData.map(async (patch) => {
+  //         const doc = await firestoreRef
+  //           .collection("newColor")
+  //           .doc(patch.bd_color)
+  //           .get();
+  //         let exists = colorList.find((item) => item?.id === doc.id);
+  //         console.log("Id........", doc.id)
+  //         if (!exists) {
+  //           colorList = colorList.concat({
+  //             ...doc.data(),
+  //             id: doc.id,
+  //             type: "color",
+  //           });
+  //         }
+  //       })
+  //     );
+
+  //     // Update the patchLocalData with bodyTypeList and colorList for each patch
+  //     updatedPatchData.forEach((patch, index) => {
+  //       patch.bodyTypeList = bodyTypeList.filter(
+  //         (item) => item?.id === patch.type
+  //       );
+  //       patch.colorList = colorList.filter((item) => item?.id === patch.bd_color);
+  //     });
+  //     console.log("Body Type List....", bodyTypeList);
+  //     console.log("Color List....", colorList);
+  // //     for (const patch of updatedPatchData) {
+  // //     patch.patches = {
+  // //       ...patch.patches,
+  // //       bodyTypeList, // Store bodyTypeList array
+  // //       colorList,    // Store colorList array
+  // //     };
+  // //   }
+  // //      // Assign the fetched lists to updatedPatchData
+  // //   updatedPatchData.forEach((patch, index) => {
+  // //     patch.patches = {
+  // //       ...patch.patches,
+  // //       bodyTypeList, // Store bodyTypeList array
+  // //       colorList,    // Store colorList array
+  // //     };
+  // //   });
+  // setpatchLocalData(updatedPatchData)
+  // setTimeout(() => {
+  //     saveInLocal()
+  // }, 2000)
+  //     // Set the updated patchLocalData state
+
+  //     // setpatchLocalData(() => {
+  //     //   saveInLocal(updatedPatchData);
+  //     //   return updatedPatchData;
+  //     // });
+  //   };
+
+  // SAVE IN LOCAL STORAGE
+  const saveInLocal = async () => {
+    if (guideLocalUrl != "" && patchLocalData?.length != 0) {
+    //   console.log("PAtches.....Local....Data...", patchLocalData);
+      let guides = [];
+
+      // AsyncStorage.removeItem('@YourGuides')
+      //    .then(() => {}).catch(() => {})
+      AsyncStorage.getItem("@YourGuides")
+        .then((data) => {
+          //   console.log("=================SAVED===================");
+          //   console.log(data);
+          //   console.log("====================================");
+          if (data && data?.length != 0) {
+            guides = JSON.parse(data);
+
+            // IF EXISTS REPLACE
+            const exists = guides.find((x) => x.id == item.id);
+            if (exists) {
+              console.log("exists....>>>>>>>>");
+              let filtered = guides.filter((x) => x.id != exists?.id);
+              filtered = filtered.concat([
+                {
+                  ...item,
+                  guideDescription: item?.description,
+                  guideId: item?.id,
+                  guideImageUrl: guideLocalUrl || item?.image_url,
+                  guideSubtitle: item?.subtitle,
+                  guideTitle: item?.title,
+                  isAddedToYourGuide: true,
+                  userId: userId,
+                  image_url: guideLocalUrl || item?.image_url,
+                  patches: patchLocalData,
+                },
+              ]);
+
+              AsyncStorage.setItem("@YourGuides", JSON.stringify(filtered))
+                .then(() => {
+                  activeClickHandler(item.id);
+                  setTimeout(() => {
+                    setitem({});
+                    props.setselectedItem({});
+                    props.onclose();
+                  }, 700);
+                })
+                .then(() => {
+                  navigation.navigate(ROUTES.YOUR_GUIDES);
+                })
+                .catch(() => {});
+            } else {
+              console.log("not exists....>>>>>>>>");
+              // IF DOES NOT EXISTS ADD
+              guides = guides.concat([
+                {
+                  ...item,
+                  guideDescription: item?.description,
+                  guideId: item?.id,
+                  guideImageUrl: guideLocalUrl || item?.image_url,
+                  guideSubtitle: item?.subtitle,
+                  guideTitle: item?.title,
+                  isAddedToYourGuide: true,
+                  userId: userId,
+                  image_url: guideLocalUrl || item?.image_url,
+                  patches: patchLocalData,
+                },
+              ]);
+
+              AsyncStorage.setItem("@YourGuides", JSON.stringify(guides))
+                .then(() => {
+                  activeClickHandler(item.id);
+                  setTimeout(() => {
+                    setitem({});
+                    props.setselectedItem({});
+                    props.onclose();
+                  }, 700);
+                })
+                .then(() => {
+                  navigation.navigate(ROUTES.YOUR_GUIDES);
+                })
+                .catch(() => {});
+            }
+          } else {
+            console.log("empty....>>>>>>>>");
+            // IF EMPTY INITIALIZE
+            guides = guides.concat([
+              {
+                ...item,
+                guideDescription: item?.description,
+                guideId: item?.id,
+                guideImageUrl: guideLocalUrl || item?.image_url,
+                guideSubtitle: item?.subtitle,
+                guideTitle: item?.title,
+                isAddedToYourGuide: true,
+                userId: userId,
+                image_url: guideLocalUrl || item?.image_url,
+                patches: patchLocalData,
+              },
+            ]);
+            AsyncStorage.setItem("@YourGuides", JSON.stringify(guides))
+              .then(() => {
+                activeClickHandler(item.id);
+                setTimeout(() => {
+                  setitem({});
+                  props.setselectedItem({});
+                  props.onclose();
+                }, 700);
+              })
+              .then(() => {
+                navigation.navigate(ROUTES.YOUR_GUIDES);
+              })
+              .catch(() => {});
+          }
+        })
+        .catch(() => {});
+    } else {
+    }
+  };
+
+  const renderScreen = () => {
+    return (
+      <View style={{ flex: 1 }}>
+        <Appbar
+          leftIcon={left_icon}
+          onLeftIconPress={() => {
+            setitem({});
+            props.setselectedItem({});
+            props.onclose();
+            // // saveInLocal()
+            // AsyncStorage.removeItem('@YourGuides')
+            //     .then(() => { alert("CLEARED") }).catch(() => { })
+          }}
+          extraHeight={true}
+        />
+        <View style={{ flex: 1 }}>
+          <View style={myStyle.componentMainView}>
+            <View style={myStyle.cardView}>
+              <Image
+                source={{ uri: item.image_url }}
+                resizeMode="contain"
+                style={myStyle.itemImageStyle}
+              />
+            </View>
+            <View style={myStyle.itemViewStyle}>
+              <Text style={myStyle.itemTitleStyle}>{item.subtitle}</Text>
+              <Text numberOfLines={2} style={myStyle.itemDescriptionStyle}>
+                {item.title}
+              </Text>
+            </View>
+          </View>
+
+          <Text style={myStyle.downloding}>
+            {isLoading && "Downloading..."}
+          </Text>
+          <Text
+            style={[
+              myStyle.downloding,
+              {
+                marginTop: 0,
+              },
+            ]}
+          >
+            {isDownloadingPatches &&
+              `${patchLocalData?.length}/${guidePactches?.length} patches`}
+          </Text>
+
+          <View
+            style={{
+              width: isTab ? width_ * 0.24 : "76%",
+              alignSelf: "center",
+            }}
+          >
+            {/* <ProgressBar progress={progress} height={18} animated={false}
+                            backgroundColor={theme ? COLORS.blackColor : COLORS.darkgreen} trackColor={COLORS.whiteColor} /> */}
+
+            <View
+              style={{
+                marginBottom: 8,
+                width: isTab
+                  ? Dimensions.get("window").width * 0.24
+                  : Dimensions.get("window").width * 0.8,
+                height: 18,
+                borderRadius: 8,
+                backgroundColor: COLORS.whiteColor,
+                zIndex: 1,
+                alignSelf: "center",
+              }}
+            >
+              <View
+                style={{
+                  position: "absolute",
+                  top: -1,
+                  marginBottom: 8,
+                  height: 19,
+                  width: `${Number(scrollPosPercent || 0).toFixed(0) * 1.9}%`,
+                  maxWidth: isTab
+                    ? Dimensions.get("window").width * 0.24
+                    : Dimensions.get("window").width * 0.8,
+                  borderRadius: 10,
+                  backgroundColor: COLORS.darkgreen,
+                }}
+              />
+            </View>
+
+            <Text
+              style={{
+                fontSize: 15,
+                color: theme ? COLORS.whiteColor : COLORS.blackColor,
+                textAlign: "center",
+                marginTop: height_ * 0.015,
+                fontFamily: FONTS.PoppinsRegular,
+              }}
+            >
+              {isLoading ? `${progress}% of 100%` : `${progress}% of 100%`}
+            </Text>
+          </View>
+
+          {/* BUTTON */}
+          <View
+            style={{
+              position: "absolute",
+              width: "100%",
+              bottom: 0,
+            }}
+          >
+            {
+              isLoading ?
+               <TouchableOpacity
+              style={{
+                width: 150,
+                backgroundColor: isLoading ? COLORS.redColor : COLORS.darkgreen,
+                paddingVertical: 12,
+                borderRadius: 7,
+                alignSelf: "center",
+                marginBottom:
+                  Platform.OS === "ios" ? height_ * 0.1 : height_ * 0.08,
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+              activeOpacity={0.8}
+              onPress={() => {
+                if (isLoading) {
+                  try {
+                    setisLoading(false);
+                    setisCancelled(true);
+                    task_
+                      .cancel((err) => {})
+                      .catch((error) => {
+                        console.log("==>>", error);
+                        if (error != "Error: canceled") {
+                          alert("Cancelled Download by user");
+                        }
+                        setisLoading(false);
+                      });
+                    setprogress(0);
+                  } catch (err_) {}
+                } else {
+                  checkPermission();
+                }
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontFamily: FONTS.PoppinsRegular,
+                  color: COLORS.whiteColor,
+                }}
+              >
+                Cancel
+                {/* { "Cancel" : "Download"} */}
+              </Text>
+            </TouchableOpacity>:null
+            }
+           
+          </View>
+        </View>
+      </View>
+    );
+  };
+  return (
+    <Modal
+      visible={props.isVisible}
+      onRequestClose={() => {
+        getAllYourGuidesFun();
+        setitem({});
+        props.setselectedItem({});
+        props.onclose();
+      }}
+    >
+      <GradientContainer>{renderScreen()}</GradientContainer>
+    </Modal>
+  );
+};
+
+export default DownloadScreen;
+
+const styles = (theme, isTab) =>
+  StyleSheet.create({
+    componentMainView: {
+      borderWidth: theme === false ? 0.4 : 0,
+      margin: 3,
+      padding: 5,
+      borderColor: COLORS.whiteColor,
+      width: isTab ? width_ * 0.23 : width_ * 0.76,
+      height: isTab ? height_ * 0.45 : height_ * 0.35,
+      backgroundColor: theme === false ? "#D5F7E6" : "transparent",
+      borderRadius: 5,
+      paddingTop: isTab ? "2%" : "5%",
+      paddingBottom: "3%",
+      marginTop: isTab ? 15 : 3,
+      alignSelf: "center",
+      marginTop: isTab ? height_ * 0.04 : height_ * 0.1,
+    },
+    cardView: {
+      flex: isTab ? 0.8 : 0.5,
+      alignItems: "center",
+    },
+    itemImageStyle: {
+      width: isTab ? "100%" : width_ * 0.6,
+      height: isTab ? "100%" : height_ * 0.23,
+    },
+    itemViewStyle: {
+      alignItems: "center",
+      position: "absolute",
+      bottom: "10%",
+      width: "100%",
+    },
+    itemTitleStyle: {
+      marginTop: 15,
+      fontFamily: FONTS.RalewaySemiBold,
+      color: theme ? COLORS.whiteColor : COLORS.blackColor,
+    },
+    downloding: {
+      color: COLORS.lightgray,
+      fontSize: 15,
+      textAlign: "center",
+      marginTop: isTab ? height_ * 0.035 : height_ * 0.05,
+      marginBottom: isTab ? height_ * 0.01 : height_ * 0.02,
+      fontFamily: FONTS.PoppinsRegular,
+    },
+  });
