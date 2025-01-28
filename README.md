@@ -1,79 +1,33 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
 
-# Getting Started
+# KEO SPA PLAYER
 
->**Note**: Make sure you have completed the [React Native - Environment Setup](https://reactnative.dev/docs/environment-setup) instructions till "Creating a new application" step, before proceeding.
+KEO SPA PLAYER is a custom audio player designed specifically for spas and similar spaces. It allows users to download encrypted audio tracks, decrypt them, and play them through the app. The songs and playlists are retrieved via an API based on the logged-in user's preferences. The app is designed to work both online and offline, allowing users to enjoy their music even without an internet connection.  
 
-## Step 1: Start the Metro Server
+The simple yet effective UI shows the downloaded playlist, where users can play any song they wish. The app uses React Native FS to download the songs and a custom native module to decrypt the songs for playback.
 
-First, you will need to start **Metro**, the JavaScript _bundler_ that ships _with_ React Native.
 
-To start Metro, run the following command from the _root_ of your React Native project:
+## 🚀 Features
 
-```bash
-# using npm
-npm start
+#### 🎵 Audio Song Player
+- Play encrypted songs that are downloaded to the device's file system.
+- Simple and intuitive UI to navigate through the playlist.
+- Secure decryption and playback of songs via a custom native module.
 
-# OR using Yarn
-yarn start
-```
+#### 🌐 Online and Offline Support
+- Retrieve playlists and songs from the API while connected to the internet.
+- Enjoy your downloaded songs even when offline by decrypting and playing them.
 
-## Step 2: Start your Application
+#### 🔒 Secure Song Decryption
+- Songs are encrypted for security and decrypted on the fly for playback using a native module.
+- All downloaded songs are stored securely on the device's file system.
 
-Let Metro Bundler run in its _own_ terminal. Open a _new_ terminal from the _root_ of your React Native project. Run the following command to start your _Android_ or _iOS_ app:
-
-### For Android
-
-```bash
-# using npm
-npm run android
-
-# OR using Yarn
-yarn android
-```
-
-### For iOS
-
-```bash
-# using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
-```
-
-If everything is set up _correctly_, you should see your new app running in your _Android Emulator_ or _iOS Simulator_ shortly provided you have set up your emulator/simulator correctly.
-
-This is one way to run your app — you can also run it directly from within Android Studio and Xcode respectively.
-
-## Step 3: Modifying your App
-
-Now that you have successfully run the app, let's modify it.
-
-1. Open `App.tsx` in your text editor of choice and edit some lines.
-2. For **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Developer Menu** (<kbd>Ctrl</kbd> + <kbd>M</kbd> (on Window and Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (on macOS)) to see your changes!
-
-   For **iOS**: Hit <kbd>Cmd ⌘</kbd> + <kbd>R</kbd> in your iOS Simulator to reload the app and see your changes!
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [Introduction to React Native](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you can't get this to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+#### 📱 Playlist Management
+- Play any song from the downloaded playlist with ease.
+- Users can see and navigate through their playlists, making song selection quick and convenient.
+## 📦 Technology Stack
+- **Frontend:** React Native for mobile development.
+- **File System:** React Native FS to handle downloading and managing audio files.
+- **Sound Playback:** React Native Sound audio playback.
+- **API:** A custom API to retrieve song playlists based on user preferences (authentication may be required for user-specific playlists).
+- **Encryption/Decryption:** Custom native module for encrypting and decrypting audio files.
+- **Offline Support:** Local file storage for offline playback of decrypted songs.
